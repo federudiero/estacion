@@ -38,7 +38,10 @@ export async function getOpenShift(): Promise<Shift | null> {
   return { id: d.id, ...(d.data() as Omit<Shift, "id">) };
 }
 
-export async function openShift(creadoPorUid: string): Promise<string> {
+export async function openShift(
+  creadoPorUid: string,
+  creadoPorEmail?: string | null
+): Promise<string> {
   // si ya hay uno, no duplica
   const q = query(
     collection(db, "shifts"),
@@ -53,7 +56,12 @@ export async function openShift(creadoPorUid: string): Promise<string> {
     turno: turnoActual(),
     openedAt: serverTimestamp(),
     creadoPorUid,
+    creadoPorEmail: creadoPorEmail ?? null,
+    // 👇 ya lo dejamos preparado para stats por operario
+    operarioUid: creadoPorUid,
+    operarioEmail: creadoPorEmail ?? null,
   });
+
   await updateDoc(ref, { id: ref.id });
   return ref.id;
 }
@@ -458,6 +466,20 @@ export async function closeShiftWithPayments(params: {
    CIERRE DIARIO (resumen por fecha)
    =========================== */
 
+export type DailyTankRow = {
+  tankId: string;
+  nombre: string;
+  producto: Combustible;
+  lecturaInicioLitros?: number | null;
+  lecturaFinLitros?: number | null;
+  entradasLitros: number;
+  ventasLitros: number;
+  teoricoFinLitros?: number | null;
+  diferenciaLitros?: number | null; // realFin - teorico
+  nivelMinimo?: number | null;      // 👈 NUEVO
+};
+
+
 export type DailyClosure = {
   fechaStr: string;
   totalTurno: number;
@@ -471,12 +493,19 @@ export type DailyClosure = {
     pagosTotalTurno: number;
     litrosTotalesTurno: number;
   }>;
+  tanks: DailyTankRow[];
 };
 
 export async function getDailyClosure(
   fechaStr: string
 ): Promise<DailyClosure> {
-  // Traemos los shifts cerrados en esa fecha
+  // Ventana horaria del día
+  const start = new Date(`${fechaStr}T00:00:00`);
+  const end = new Date(`${fechaStr}T23:59:59.999`);
+  const startMs = start.getTime();
+  const endMs = end.getTime();
+
+  // --- 1) Shifts cerrados en esa fecha ---
   const qs = await getDocs(
     query(
       collection(db, "shifts"),
@@ -526,11 +555,138 @@ export async function getDailyClosure(
     });
   });
 
+  // --- 2) Lecturas de tanques del día (inicio / fin reales) ---
+  const readingsSnap = await getDocs(collection(db, "tank_readings"));
+  type TankReadState = {
+    startTime?: number;
+    startLitros?: number;
+    endTime?: number;
+    endLitros?: number;
+  };
+  const readingsByTank: Record<string, TankReadState> = {};
+
+  readingsSnap.forEach((d) => {
+    const x: any = d.data();
+    const ts = x.takenAt;
+    if (!ts || typeof ts.toMillis !== "function") return;
+    const tMs = ts.toMillis();
+    if (tMs < startMs || tMs > endMs) return;
+
+    const tankId = String(x.tankId ?? "");
+    if (!tankId) return;
+    const tele = x.teleLitros != null ? Number(x.teleLitros) : NaN;
+    if (!Number.isFinite(tele)) return;
+
+    const prev = readingsByTank[tankId] || {};
+    if (prev.startTime == null || tMs < prev.startTime) {
+      prev.startTime = tMs;
+      prev.startLitros = tele;
+    }
+    if (prev.endTime == null || tMs > prev.endTime) {
+      prev.endTime = tMs;
+      prev.endLitros = tele;
+    }
+    readingsByTank[tankId] = prev;
+  });
+
+  // --- 3) Recepciones de camión del día (entradas a cada tanque) ---
+  const recepSnap = await getDocs(collection(db, "recepciones_camion"));
+  const entradasByTank: Record<string, number> = {};
+
+  recepSnap.forEach((d) => {
+    const x: any = d.data();
+    const ts = x.createdAt;
+    if (!ts || typeof ts.toMillis !== "function") return;
+    const tMs = ts.toMillis();
+    if (tMs < startMs || tMs > endMs) return;
+
+    const tankId = String(x.tanqueId ?? "");
+    if (!tankId) return;
+
+    const litros = Number(x.litros15C ?? x.litrosFactura ?? 0);
+    if (!Number.isFinite(litros)) return;
+
+    entradasByTank[tankId] = (entradasByTank[tankId] ?? 0) + litros;
+  });
+
+  // --- 4) Armar filas por tanque ---
+  const tanksList = await listTanks();
+
+  const tanks: DailyTankRow[] = tanksList.map((tank) => {
+    const tankId = tank.id;
+    const producto = tank.producto;
+    const ventasLitros = ventasLitrosPorCombustible[producto] ?? 0;
+    const lect = readingsByTank[tankId] || {};
+    const entradasLitros = entradasByTank[tankId] ?? 0;
+
+    const lecturaInicioLitros =
+      lect.startLitros != null && Number.isFinite(lect.startLitros)
+        ? lect.startLitros
+        : null;
+    const lecturaFinLitros =
+      lect.endLitros != null && Number.isFinite(lect.endLitros)
+        ? lect.endLitros
+        : null;
+
+    let teoricoFinLitros: number | null = null;
+    let diferenciaLitros: number | null = null;
+
+    if (lecturaInicioLitros != null) {
+      // Teórico = inicio + entradas - ventas
+      teoricoFinLitros =
+        lecturaInicioLitros + entradasLitros - ventasLitros;
+
+      if (lecturaFinLitros != null) {
+        diferenciaLitros = lecturaFinLitros - teoricoFinLitros;
+      }
+    }
+
+ return {
+  tankId,
+  nombre: tank.nombre,
+  producto,
+  lecturaInicioLitros,
+  lecturaFinLitros,
+  entradasLitros,
+  ventasLitros,
+  teoricoFinLitros,
+  diferenciaLitros,
+  nivelMinimo: tank.nivelMinimo ?? null, // 👈 NUEVO
+};
+  });
+
   return {
     fechaStr,
     totalTurno,
     ventasLitrosPorCombustible,
     litrosTotales,
     shifts,
+    tanks,
   };
+}
+
+
+/* ===========================
+   FICHADAS (asistencia de operarios)
+   =========================== */
+
+export type FichadaTipo = "entrada" | "salida";
+
+export async function registrarFichada(params: {
+  uid: string;
+  email?: string | null;
+  tipo: FichadaTipo;
+  shiftId?: string | null;
+}) {
+  const now = new Date();
+  const fechaStr = now.toISOString().slice(0, 10); // yyyy-MM-dd
+
+  await addDoc(collection(db, "fichadas"), {
+    uid: params.uid,
+    email: params.email ?? null,
+    tipo: params.tipo,         // "entrada" | "salida"
+    shiftId: params.shiftId ?? null,
+    fechaStr,
+    createdAt: serverTimestamp(),
+  });
 }

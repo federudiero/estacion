@@ -7,6 +7,9 @@ import { getDailyClosure } from '@/lib/firestore';
 
 const hoyYmd = () => new Date().toISOString().slice(0, 10);
 
+// Umbral para marcar diferencia de litros como “alta”
+const UMBRAL_DIF_LITROS = 50;
+
 export default function CierreDiarioClient() {
   const [fechaStr, setFechaStr] = useState<string>(hoyYmd);
   const [data, setData] = useState<DailyClosure | null>(null);
@@ -41,6 +44,8 @@ export default function CierreDiarioClient() {
     gasoil: 0,
     gasoil_premium: 0,
   };
+
+  const tanks = data?.tanks ?? [];
 
   return (
     <div className="space-y-4">
@@ -219,6 +224,125 @@ export default function CierreDiarioClient() {
                         </td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Tabla de variación por tanque + alertas */}
+          <div className="rounded-2xl bg-white shadow p-4">
+            <h2 className="text-sm font-semibold mb-2">
+              Variación de stock por tanque
+            </h2>
+
+            {tanks.length === 0 ? (
+              <div className="text-xs text-gray-500">
+                No hay lecturas ni movimientos de tanques para esta fecha.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b bg-gray-50">
+                      <th className="text-left py-2 px-2">Tanque</th>
+                      <th className="text-left py-2 px-2">Producto</th>
+                      <th className="text-right py-2 px-2">Inicio (L)</th>
+                      <th className="text-right py-2 px-2">Entradas (L)</th>
+                      <th className="text-right py-2 px-2">Ventas (L)</th>
+                      <th className="text-right py-2 px-2">Fin (L)</th>
+                      <th className="text-right py-2 px-2">
+                        Dif. vs teórico (L)
+                      </th>
+                      <th className="text-left py-2 px-2">Alertas</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tanks.map((t) => {
+                      const bajoMinimo =
+                        t.nivelMinimo != null &&
+                        t.lecturaFinLitros != null &&
+                        t.lecturaFinLitros < t.nivelMinimo;
+
+                      const difAbs =
+                        t.diferenciaLitros != null
+                          ? Math.abs(t.diferenciaLitros)
+                          : 0;
+                      const difAlta =
+                        t.diferenciaLitros != null &&
+                        difAbs >= UMBRAL_DIF_LITROS;
+
+                      const rowClass =
+                        'border-b last:border-0 ' +
+                        (bajoMinimo || difAlta ? 'bg-red-50' : '');
+
+                      return (
+                        <tr key={t.tankId} className={rowClass}>
+                          <td className="py-1 px-2">{t.nombre}</td>
+                          <td className="py-1 px-2">{t.producto}</td>
+                          <td className="py-1 px-2 text-right">
+                            {t.lecturaInicioLitros != null
+                              ? t.lecturaInicioLitros.toLocaleString('es-AR', {
+                                  maximumFractionDigits: 0,
+                                })
+                              : '—'}
+                          </td>
+                          <td className="py-1 px-2 text-right">
+                            {t.entradasLitros.toLocaleString('es-AR', {
+                              maximumFractionDigits: 0,
+                            })}
+                          </td>
+                          <td className="py-1 px-2 text-right">
+                            {t.ventasLitros.toLocaleString('es-AR', {
+                              maximumFractionDigits: 0,
+                            })}
+                          </td>
+                          <td
+                            className={
+                              'py-1 px-2 text-right ' +
+                              (bajoMinimo ? 'text-red-600 font-semibold' : '')
+                            }
+                          >
+                            {t.lecturaFinLitros != null
+                              ? t.lecturaFinLitros.toLocaleString('es-AR', {
+                                  maximumFractionDigits: 0,
+                                })
+                              : '—'}
+                          </td>
+                          <td
+                            className={
+                              'py-1 px-2 text-right ' +
+                              (difAlta ? 'text-red-600 font-semibold' : '')
+                            }
+                          >
+                            {t.diferenciaLitros != null
+                              ? t.diferenciaLitros.toLocaleString('es-AR', {
+                                  maximumFractionDigits: 0,
+                                })
+                              : '—'}
+                          </td>
+                          <td className="py-1 px-2">
+                            <div className="flex flex-wrap gap-1">
+                              {bajoMinimo && (
+                                <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700">
+                                  Bajo mínimo
+                                </span>
+                              )}
+                              {difAlta && (
+                                <span className="inline-flex items-center rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-medium text-orange-700">
+                                  Diferencia alta
+                                </span>
+                              )}
+                              {!bajoMinimo && !difAlta && (
+                                <span className="text-[10px] text-gray-400">
+                                  OK
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
