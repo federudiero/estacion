@@ -1,0 +1,61 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "shifts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "estado", "order": "ASCENDING" },
+        { "fieldPath": "openedAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "tanques",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "producto", "order": "ASCENDING" },
+        { "fieldPath": "nombre", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "recepciones_camion",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tanqueId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "recepciones_camion",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "proveedor", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cierres",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "fechaStr", "order": "DESCENDING" },
+        { "fieldPath": "emailRepartidor", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "pedidos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "fechaStr", "order": "DESCENDING" },
+        { "fieldPath": "repartidorEmail", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "productos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "categoria", "order": "ASCENDING" },
+        { "fieldPath": "nombre", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
